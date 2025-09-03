@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lector QR Cédula Chile → Excel (Optimizado para HTTPS/GitHub Pages)</title>
+  <style>
+    body{font-family:sans-serif;background:#0f172a;color:#e5e7eb;margin:0;padding:20px}
+    .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:16px;margin-bottom:16px}
+    label{display:block;font-size:12px;color:#9ca3af;margin-bottom:4px}
+    input,select,button{border-radius:8px;border:1px solid #243042;background:#0b1220;color:#e5e7eb;padding:8px;font-size:14px;width:100%}
+    button{cursor:pointer;margin-top:8px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #1f2937;padding:6px;text-align:left}
+    th{background:#1f2937}
+    pre{background:#1f2937;padding:10px;border-radius:8px;overflow-x:auto}
+  </style>
+</head>
+<body>
+  <h1>Escáner QR Cédula Chilena → Exportar a Excel (CSV)</h1>
+
+  <div class="card">
+    <video id="video" width="100%" height="240" autoplay playsinline style="background:#000"></video>
+    <canvas id="canvas" style="display:none"></canvas>
+    <div>
+      <label>RUN / RUT</label>
+      <input id="rut" readonly />
+      <label>Nombre completo</label>
+      <input id="nombre" />
+      <label>Fecha de nacimiento</label>
+      <input id="nacimiento" type="date" />
+      <label>Estado civil</label>
+      <select id="estado">
+        <option value="">— Selecciona —</option>
+        <option>Soltero/a</option>
+        <option>Casado/a</option>
+        <option>Divorciado/a</option>
+        <option>Viudo/a</option>
+        <option>Conviviente civil</option>
+      </select>
+      <label>Teléfono</label>
+      <input id="telefono" type="tel" />
+      <label>Email</label>
+      <input id="email" type="email" />
+      <label>Dirección</label>
+      <input id="direccion" type="text" />
+      <button id="addBtn">Agregar automáticamente a la tabla</button>
+      <button id="downloadCsv">Descargar CSV</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <table id="tabla">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Fecha Nac.</th>
+          <th>Estado Civil</th>
+          <th>RUT</th>
+          <th>Teléfono</th>
+          <th>Email</th>
+          <th>Dirección</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Cómo usar en tu celular</h2>
+    <p>⚠️ Para que la cámara funcione, este archivo debe abrirse desde un sitio <strong>HTTPS</strong> o <strong>localhost</strong>. Si lo abres como <code>file://</code>, la cámara será bloqueada.</p>
+    <h3>Opción 1: Subir a GitHub Pages</h3>
+    <ol>
+      <li>Crea un repositorio en GitHub.</li>
+      <li>Sube este archivo con el nombre <code>index.html</code>.</li>
+      <li>Entra a Settings → Pages → selecciona la rama <code>main</code> y carpeta <code>/root</code>.</li>
+      <li>Tu lector QR quedará disponible en una URL segura HTTPS como <code>https://usuario.github.io/repositorio/</code>.</li>
+    </ol>
+    <h3>Opción 2: Servidor local en tu PC</h3>
+    <p>Ejecuta este comando en la carpeta donde está el archivo:</p>
+    <pre>python -m http.server 8000</pre>
+    <p>Luego abre en tu celular (misma red WiFi) la dirección:</p>
+    <pre>http://IP_DE_TU_PC:8000/</pre>
+  </div>
+
+  <script>
+    const video=document.getElementById('video');
+    const canvas=document.getElementById('canvas');
+    const ctx=canvas.getContext('2d');
+    const tbody=document.querySelector('#tabla tbody');
+    let lastCode="";
+
+    async function startCam(){
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}, audio:false});
+        video.srcObject=stream;
+        await video.play();
+        requestAnimationFrame(scanLoop);
+      }catch(e){
+        console.error("Error al abrir cámara",e);
+        alert("No se pudo acceder a la cámara. Debes abrir este archivo desde HTTPS (ej: GitHub Pages) o localhost y dar permisos.");
+      }
+    }
+
+    async function scanLoop(){
+      if(video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth;
+        canvas.height=video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        try{
+          if('BarcodeDetector' in window){
+            const detector=new BarcodeDetector({formats:['qr_code']});
+            const codes=await detector.detect(canvas);
+            if(codes.length>0){
+              const val=codes[0].rawValue;
+              if(val!==lastCode){
+                lastCode=val;
+                procesarQR(val);
+                agregarFila();
+              }
+            }
+          }else{
+            console.error("BarcodeDetector no soportado en este navegador.");
+            alert("Tu navegador no soporta BarcodeDetector. Usa Chrome/Edge en Android o Safari en iOS 16+.");
+          }
+        }catch(e){console.warn("Error al detectar QR",e)}
+      }
+      requestAnimationFrame(scanLoop);
+    }
+
+    function procesarQR(text){
+      let runExtraido='';
+      const m=text.match(/(\d{7,9})-?([\dkK])/i);
+      if(m) runExtraido=m[1]+"-"+m[2];
+      if(runExtraido){
+        document.getElementById('rut').value=runExtraido;
+      }
+
+      // Intentar extraer nombre y fecha de nacimiento desde QR (si viene en el string)
+      if(text.includes("|")){
+        const partes=text.split("|");
+        if(partes[1]){
+          document.getElementById('nombre').value=partes[1].trim();
+        }
+        if(partes[2]){
+          const f=partes[2].trim().match(/(\d{2})-(\d{2})-(\d{4})/);
+          if(f){
+            document.getElementById('nacimiento').value=`${f[3]}-${f[2]}-${f[1]}`;
+          }
+        }
+      }
+    }
+
+    function agregarFila(){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${nombre.value}</td><td>${nacimiento.value}</td><td>${estado.value}</td><td>${rut.value}</td><td>${telefono.value}</td><td>${email.value}</td><td>${direccion.value}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    document.getElementById('addBtn').onclick=agregarFila;
+
+    document.getElementById('downloadCsv').onclick=()=>{
+      const filas=[["Nombre","FechaNacimiento","EstadoCivil","RUT","Telefono","Email","Direccion"]];
+      for(const tr of tbody.querySelectorAll('tr')){
+        const c=[...tr.children].map(td=>`"${td.textContent}"`);
+        filas.push(c);
+      }
+      const csv=filas.map(f=>f.join(',')).join('\n');
+      const blob=new Blob(["\ufeff"+csv],{type:'text/csv;charset=utf-8'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='export_cedulas.csv';
+      a.click();
+    };
+
+    startCam();
+  </script>
+</body>
+</html>
